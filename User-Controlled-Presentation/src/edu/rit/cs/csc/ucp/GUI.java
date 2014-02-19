@@ -1,11 +1,15 @@
 package edu.rit.cs.csc.ucp;
 
+import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Image;
+import java.awt.event.ComponentEvent;
+import java.awt.event.ComponentListener;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.ListIterator;
@@ -14,10 +18,15 @@ import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
+import net.coobird.thumbnailator.Thumbnailator;
+
 
 public class GUI implements Actions {
 	
 	private final JFrame frame;
+	
+	//TODO handle event-thread threading
+	//TODO images are displayed most of the time... is it taking too long to resize the image?
 	
 	public GUI() {
 		//TODO run borderless
@@ -28,6 +37,33 @@ public class GUI implements Actions {
 		frame.setLocationRelativeTo(null);
 		frame.setAlwaysOnTop(Settings.AlwaysOnTop);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		
+		frame.addComponentListener(new ComponentListener() {
+			
+			@Override
+			public void componentHidden(ComponentEvent e) {}
+			
+			@Override
+			public void componentMoved(ComponentEvent e) {}
+			
+			@Override
+			public void componentResized(ComponentEvent e) {
+				System.out.println("Component resized, refreshing last display and invalidating image cache");
+				
+				if(lastImage != null) {
+					//TODO what threads are accessing lastImage?
+					int width = frame.getContentPane().getWidth();
+					int height = frame.getContentPane().getHeight();
+					displayImage(Thumbnailator.createThumbnail(lastImage, width, height));
+				}
+				
+				imageCache.clear();
+			}
+			
+			@Override
+			public void componentShown(ComponentEvent e) {}
+			
+		});
 		
 		findImageFiles();
 	}
@@ -49,6 +85,8 @@ public class GUI implements Actions {
 	private LinkedList<File> imageFiles = new LinkedList<File>();
 	private HashMap<File, BufferedImage> imageCache = new HashMap<File, BufferedImage>();
 	private ListIterator<File> imageIterator = null;
+	
+	private BufferedImage lastImage = null;
 	
 	private void findImageFiles() {
 		File folder = new File(Settings.getSlideFolder());
@@ -73,7 +111,21 @@ public class GUI implements Actions {
 			imageFiles.add(f);
 		}
 		
-		Collections.sort(imageFiles);
+		Collections.sort(imageFiles, new Comparator<File>() {
+			
+			@Override
+			public int compare(File f1, File f2) {
+				if(f1 == null && f2 == null) {
+					return 0;
+				} else if(f1 == null) {
+					return -1;
+				} else if(f2 == null) {
+					return 1;
+				}
+				
+				return f1.getName().compareToIgnoreCase(f2.getName());
+			}
+		});
 	}
 	
 	private void cacheNewErrorImage(File key, String msg) {
@@ -141,6 +193,13 @@ public class GUI implements Actions {
 			if(file != null) {
 				System.out.println("Loading image: " + file.getAbsolutePath());
 				bi = ImageIO.read(file);
+				
+				if(bi != null) {
+					int width = frame.getWidth();
+					int height = frame.getHeight();
+					
+					bi = Thumbnailator.createThumbnail(bi, width, height);
+				}
 			} else {
 				System.out.println("Loading image: (file is null)");
 			}
@@ -212,9 +271,7 @@ public class GUI implements Actions {
 		
 		BufferedImage bi = nextImage();
 		
-		frame.getContentPane().prepareImage(bi, null);
-		Graphics g = frame.getContentPane().getGraphics();
-		g.drawImage(bi, 0, 0, null);
+		displayImage(bi);
 	}
 	
 	@Override
@@ -223,9 +280,43 @@ public class GUI implements Actions {
 		
 		BufferedImage bi = prevImage();
 		
-		frame.getContentPane().prepareImage(bi, null);
-		Graphics g = frame.getContentPane().getGraphics();
-		g.drawImage(bi, 0, 0, null);
+		displayImage(bi);
 	}
 	
+	//--------------------------------------------------------------------------
+	
+	public void displayImage(BufferedImage bi) {
+		Graphics g = frame.getContentPane().getGraphics();
+		g.setColor(Color.black);
+		g.fillRect(0, 0, frame.getWidth(), frame.getHeight());
+		
+		lastImage = bi;
+		if(bi == null) {
+			return;
+		}
+		
+		//center the image
+		int biWidth = bi.getWidth()/2;
+		int biHeight = bi.getHeight()/2;
+		
+		int winWidth = frame.getContentPane().getWidth()/2;
+		int winHeight = frame.getContentPane().getHeight()/2;
+		
+		int sWidth = winWidth - biWidth;
+		int sHeight = winHeight - biHeight;
+		
+		g.drawImage(bi, sWidth, sHeight, null);
+	}
+	
+	public void refreshSlide(boolean userAction) {
+		System.out.println("Refresh slide.  (user action: " + userAction + ")");
+		
+		BufferedImage bi = lastImage;
+		
+		frame.getContentPane().prepareImage(bi, null);
+		Graphics g = frame.getContentPane().getGraphics();
+		g.setColor(Color.black);
+		g.fillRect(0, 0, frame.getWidth(), frame.getHeight());
+		g.drawImage(bi, 0, 0, null);
+	}
 }
